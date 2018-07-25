@@ -11,7 +11,15 @@ defmodule Indexer.BlockFetcher do
 
   alias EthereumJSONRPC
   alias Explorer.Chain
-  alias Indexer.{BalanceFetcher, AddressExtraction, InternalTransactionFetcher, Sequence}
+
+  alias Indexer.{
+    BalanceFetcher,
+    AddressExtraction,
+    BufferedTask,
+    InternalTransactionFetcher,
+    Sequence,
+    TokenTransfers
+  }
 
   # dialyzer thinks that Logger.debug functions always have no_local_return
   @dialyzer {:nowarn_function, import_range: 3}
@@ -269,11 +277,13 @@ defmodule Indexer.BlockFetcher do
          {:receipts, {:ok, receipt_params}} <-
            {:receipts, fetch_transaction_receipts(state, transactions_without_receipts)},
          %{logs: logs, receipts: receipts} = receipt_params,
-         transactions_with_receipts = put_receipts(transactions_without_receipts, receipts) do
+         transactions_with_receipts = put_receipts(transactions_without_receipts, receipts),
+         %{token_transfers: token_transfers, tokens: tokens} = TokenTransfers.from_log_params(logs) do
       addresses =
         AddressExtraction.extract_addresses(%{
           blocks: blocks,
           logs: logs,
+          token_transfers: token_transfers,
           transactions: transactions_with_receipts
         })
 
@@ -284,6 +294,8 @@ defmodule Indexer.BlockFetcher do
         blocks: [params: blocks],
         logs: [params: logs],
         receipts: [params: receipts],
+        tokens: [params: tokens],
+        token_transfers: [params: token_transfers],
         transactions: [on_conflict: :replace_all, params: transactions_with_receipts]
       )
     else

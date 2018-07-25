@@ -7,6 +7,7 @@ defmodule Explorer.Repo.Migrations.CreateTokens do
       add(:symbol, :string)
       add(:total_supply, :decimal)
       add(:decimals, :smallint)
+      add(:type, :string)
 
       add(
         :contract_address_hash,

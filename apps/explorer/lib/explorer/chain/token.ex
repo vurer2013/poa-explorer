@@ -1,6 +1,6 @@
 defmodule Explorer.Chain.Token do
   @moduledoc """
-  Represents an ERC-20 token.
+  Represents an ERC-20 or ERC-721 token.
   """
 
   use Ecto.Schema
@@ -13,6 +13,7 @@ defmodule Explorer.Chain.Token do
   * `:symbol` - Trading symbol of the token
   * `:total_supply` - The total supply of the token
   * `:decimals` - Number of decimal places the token can be subdivided to
+  * `:type` - Type of token
   * `:contract_address` - The `t:Address.t/0` of the token's contract
   * `:contract_address_hash` - Address hash foreign key
   """
@@ -21,6 +22,7 @@ defmodule Explorer.Chain.Token do
           symbol: String.t(),
           total_supply: Decimal.t(),
           decimals: non_neg_integer(),
+          type: String.t(),
           contract_address: %Ecto.Association.NotLoaded{} | Address.t(),
           contract_address_hash: Hash.Address.t()
         }
@@ -30,6 +32,7 @@ defmodule Explorer.Chain.Token do
     field(:symbol, :string)
     field(:total_supply, :decimal)
     field(:decimals, :integer)
+    field(:type, :string)
 
     belongs_to(
       :contract_address,
@@ -45,8 +48,8 @@ defmodule Explorer.Chain.Token do
   @doc false
   def changeset(%Token{} = token, params \\ %{}) do
     token
-    |> cast(params, ~w(name symbol total_supply decimals contract_address_hash)a)
-    |> validate_required(~w(contract_address_hash))
+    |> cast(params, ~w(name symbol total_supply decimals type contract_address_hash)a)
+    |> validate_required(~w(contract_address_hash type)a)
     |> foreign_key_constraint(:contract_address)
     |> unique_constraint(:contract_address_hash)
   end

@@ -71,6 +71,9 @@ defmodule Explorer.Mixfile do
       {:credo, "0.9.2", only: [:dev, :test], runtime: false},
       {:crontab, "~> 1.1"},
       {:dialyxir, "~> 0.5", only: [:dev, :test], runtime: false},
+      # Casting Ethereum-native types to Elixir-native types
+      {:ecto, "~> 2.2"},
+      # Data factory for testing
       {:ex_machina, "~> 2.1", only: [:test]},
       # Code coverage
       {:excoveralls, "~> 0.8.1", only: [:test]},
