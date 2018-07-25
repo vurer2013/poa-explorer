@@ -61,8 +61,6 @@ defmodule EthereumJsonrpc.MixProject do
       {:credo, "0.9.2", only: [:dev, :test], runtime: false},
       # Static Type Checking
       {:dialyxir, "~> 0.5", only: [:dev, :test], runtime: false},
-      # Casting Ethereum-native types to Elixir-native types
-      {:ecto, "~> 2.2"},
       # Code coverage
       {:excoveralls, "~> 0.8.1", only: [:test]},
       # JSONRPC HTTP Post calls
@@ -74,7 +72,7 @@ defmodule EthereumJsonrpc.MixProject do
       # Convert unix timestamps in JSONRPC to DateTimes
       {:timex, "~> 3.1.24"},
       # Encode/decode function names and arguments
-      {:ex_abi, "~> 0.1.13"}
+      {:ex_abi, "~> 0.1.14"}
     ]
   end
 end

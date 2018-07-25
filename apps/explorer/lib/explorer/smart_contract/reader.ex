@@ -7,9 +7,24 @@ defmodule Explorer.SmartContract.Reader do
   """
 
   alias Explorer.Chain
-  alias EthereumJSONRPC.Encoder
   alias Explorer.Chain.Hash
+  alias Explorer.Chain.Hash.Address
+  alias EthereumJSONRPC.Encoder
 
+  @typedoc """
+  Map of functions to call with the values for the function to be called with.
+  """
+  @type functions :: %{String.t() => [term()]}
+
+  @typedoc """
+  Map of function call to function call results.
+  """
+  @type functions_results :: %{String.t() => {:ok, term()} | {:error, String.t()}}
+
+  @typedoc """
+  Options that can be forwarded when calling the Ethereum JSON RPC.
+  """
+  @type contract_call_options :: [{:json_rpc_named_arguments, EthereumJSONRPC.json_rpc_named_arguments()}]
   @doc """
   Queries the contract functions on the blockchain and returns the call results.
 
@@ -18,28 +33,26 @@ defmodule Explorer.SmartContract.Reader do
   Note that for this example to work the database must be up to date with the
   information available in the blockchain.
 
-  ```
-  $ Explorer.SmartContract.Reader.query_contract(
-    %Explorer.Chain.Hash{
-      byte_count: 20,
-      bytes: <<0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>
-    },
-    %{"sum" => [20, 22]}
-  )
-  # => %{"sum" => [42]}
+      $ Explorer.SmartContract.Reader.query_verified_contract(
+        %Explorer.Chain.Hash{
+          byte_count: 20,
+          bytes: <<0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>
+        },
+        %{"sum" => [20, 22]}
+      )
+      # => %{"sum" => {:ok, 42}}
 
-  $ Explorer.SmartContract.Reader.query_contract(
-    %Explorer.Chain.Hash{
-      byte_count: 20,
-      bytes: <<0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>
-    },
-    %{"sum" => [1, "abc"]}
-  )
-  # => %{"sum" => ["Data overflow encoding int, data `abc` cannot fit in 256 bits"]}
-  ```
+      $ Explorer.SmartContract.Reader.query_verified_contract(
+        %Explorer.Chain.Hash{
+          byte_count: 20,
+          bytes: <<0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>
+        },
+        %{"sum" => [1, "abc"]}
+      )
+      # => %{"sum" => {:error, "Data overflow encoding int, data `abc` cannot fit in 256 bits"}}
   """
-  @spec query_contract(%Explorer.Chain.Hash{}, %{String.t() => [term()]}) :: map()
-  def query_contract(address_hash, functions) do
+  @spec query_verified_contract(String.t(), functions()) :: functions_results()
+  def query_verified_contract(address_hash, functions) do
     json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
 
     contract_address = Hash.to_string(address_hash)
@@ -49,18 +62,39 @@ defmodule Explorer.SmartContract.Reader do
       |> Chain.address_hash_to_smart_contract()
       |> Map.get(:abi)
 
-    try do
-      blockchain_result =
-        abi
-        |> Encoder.encode_abi(functions)
-        |> Enum.map(&setup_call_payload(&1, contract_address))
-        |> EthereumJSONRPC.execute_contract_functions(json_rpc_named_arguments)
+    query_contract(contract_address, abi, functions, json_rpc_named_arguments)
+  end
 
-      Encoder.decode_abi_results(blockchain_result, abi, functions)
-    rescue
-      error ->
-        format_error(functions, error.message)
-    end
+  @doc """
+  Runs contract functions on a given address for an unverified contract with an expected ABI.
+
+  ## Options
+
+  * `:json_rpc_named_arguments` - Options to forward for calling the Ethereum JSON RPC. See
+    `t:EthereumJSONRPC.json_rpc_named_arguments.t/0` for full list of options.
+  """
+  @spec query_unverified_contract(Address.t(), map(), functions(), contract_call_options()) :: functions_results()
+  def query_unverified_contract(%Hash{byte_count: unquote(Address.byte_count())} = address, abi, functions, opts \\ []) do
+    contract_address = Hash.to_string(address)
+
+    json_rpc_named_arguments =
+      Keyword.get(opts, :json_rpc_named_arguments) || Application.get_env(:explorer, :json_rpc_named_arguments)
+
+    query_contract(contract_address, abi, functions, json_rpc_named_arguments)
+  end
+
+  @spec query_contract(String.t(), term(), functions(), EthereumJSONRPC.json_rpc_named_arguments()) :: functions_results()
+  defp query_contract(contract_address, abi, functions, json_rpc_named_arguments) do
+    blockchain_result =
+      abi
+      |> Encoder.encode_abi(functions)
+      |> Enum.map(&setup_call_payload(&1, contract_address))
+      |> EthereumJSONRPC.execute_contract_functions(json_rpc_named_arguments)
+
+    Encoder.decode_abi_results(blockchain_result, abi, functions)
+  rescue
+    error ->
+      format_error(functions, error.message)
   end
 
   defp format_error(functions, message) do
@@ -169,7 +203,7 @@ defmodule Explorer.SmartContract.Reader do
 
   defp fetch_from_blockchain(contract_address_hash, %{name: name, args: args, outputs: outputs}) do
     contract_address_hash
-    |> query_contract(%{name => normalize_args(args)})
+    |> query_verified_contract(%{name => normalize_args(args)})
     |> link_outputs_and_values(outputs, name)
   end
 
@@ -194,9 +228,9 @@ defmodule Explorer.SmartContract.Reader do
   end
 
   def link_outputs_and_values(blockchain_values, outputs, function_name) do
-    values = Map.get(blockchain_values, function_name, [""])
+    {:ok, value} = Map.get(blockchain_values, function_name, {:ok, ""})
 
-    for output <- outputs, value <- values do
+    for output <- outputs do
       new_value(output, value)
     end
   end

@@ -6,7 +6,18 @@ defmodule Explorer.Chain.Import do
   import Ecto.Query, only: [from: 2]
 
   alias Ecto.{Changeset, Multi}
-  alias Explorer.Chain.{Address, Balance, Block, Hash, InternalTransaction, Log, Transaction, Wei}
+  alias Explorer.Chain.{
+    Address,
+    Balance,
+    Block,
+    Hash,
+    InternalTransaction,
+    Log,
+    Token,
+    TokenTransfer,
+    Transaction,
+    Wei
+  }
   alias Explorer.Repo
 
   @typep addresses_option :: {:addresses, [params_option | timeout_option | with_option]}
@@ -21,6 +32,8 @@ defmodule Explorer.Chain.Import do
   @typep timeout_option :: {:timeout, timeout}
   @typep timestamps :: %{inserted_at: DateTime.t(), updated_at: DateTime.t()}
   @typep timestamps_option :: {:timestamps, timestamps}
+  @typep token_transfers_option :: {:token_transfers, [on_conflict_option | params_option | timeout_option]}
+  @typep tokens_option :: {:tokens, [on_conflict_option | params_option | timeout_option]}
   @typep transactions_option :: {:transactions, [on_conflict_option | params_option | timeout_option | with_option]}
   @typep with_option :: {:with, changeset_function_name :: atom}
 
@@ -32,6 +45,8 @@ defmodule Explorer.Chain.Import do
           | internal_transactions_option
           | logs_option
           | receipts_option
+          | token_transfers_option
+          | tokens_option
           | timeout_option
           | transactions_option
         ]
@@ -48,6 +63,8 @@ defmodule Explorer.Chain.Import do
              ],
              optional(:logs) => [Log.t()],
              optional(:receipts) => [Hash.Full.t()],
+             optional(:token_transfers) => [TokenTransfer.t()],
+             optional(:tokens) => [Token.t()],
              optional(:transactions) => [Hash.Full.t()]
            }}
           | {:error, [Changeset.t()]}
@@ -81,6 +98,8 @@ defmodule Explorer.Chain.Import do
   @insert_blocks_timeout 60_000
   @insert_internal_transactions_timeout 60_000
   @insert_logs_timeout 60_000
+  @insert_token_transfers_timeout 60_000
+  @insert_tokens_timeout 60_000
   @insert_transactions_timeout 60_000
 
   @doc """
@@ -95,6 +114,8 @@ defmodule Explorer.Chain.Import do
   | `:blocks`                | `[Explorer.Chain.Block.t()]`                                                                    | List of `t:Explorer.Chain.Block.t/0`s                                                         |
   | `:internal_transactions` | `[%{index: non_neg_integer(), transaction_hash: Explorer.Chain.Hash.t()}]`                      | List of maps of the `t:Explorer.Chain.InternalTransaction.t/0` `index` and `transaction_hash` |
   | `:logs`                  | `[Explorer.Chain.Log.t()]`                                                                      | List of `t:Explorer.Chain.Log.t/0`s                                                           |
+  | `:token_transfers`       | `[Explorer.Chain.TokenTransfer.t()]`                                                            | List of `t:Explor.Chain.TokenTransfer.t/0`s                                                   |
+  | `:tokens`                | `[Explorer.Chain.Token.t()]`                                                                    | List of `t:Explorer.Chain.token.t/0`s                                                         |
   | `:transactions`          | `[Explorer.Chain.Hash.t()]`                                                                     | List of `t:Explorer.Chain.Transaction.t/0` `hash`                                             |
 
   The params for each key are validated using the corresponding `Ecto.Schema` module's `changeset/2` function.  If there
@@ -134,6 +155,14 @@ defmodule Explorer.Chain.Import do
       * `:timeout` - the timeout for inserting all logs. Defaults to `#{@insert_logs_timeout}` milliseconds.
     * `:timeout` - the timeout for the whole `c:Ecto.Repo.transaction/0` call.  Defaults to `#{@transaction_timeout}`
       milliseconds.
+    * `:token_transfers`
+      * `:params` - `list` of params for `Explorer.Chain.TokenTransfer.changeset/2`
+      * `:timeout` - the timeout for inserting all token transfers. Defaults to `#{@insert_token_transfers_timeout}` milliseconds.
+    * `:tokens`
+      * `:on_conflict` - Whether to do `:nothing` or `:replace_all` columns when there is a pre-existing token
+        with the same contract address hash.
+      * `:params` - `list` of params for `Explorer.Chain.Token.changeset/2`
+      * `:timeout` - the timeout for inserting all tokens. Defaults to `#{@insert_tokens_timeout}` milliseconds.
     * `:transactions`
       * `:on_conflict` - Whether to do `:nothing` or `:replace_all` columns when there is a pre-existing transaction
         with the same hash.
@@ -232,6 +261,8 @@ defmodule Explorer.Chain.Import do
     blocks: Block,
     internal_transactions: InternalTransaction,
     logs: Log,
+    token_transfers: TokenTransfer,
+    tokens: Token,
     transactions: Transaction
   }
 
@@ -247,6 +278,8 @@ defmodule Explorer.Chain.Import do
     |> run_transactions(ecto_schema_module_to_changes_list_map, full_options)
     |> run_internal_transactions(ecto_schema_module_to_changes_list_map, full_options)
     |> run_logs(ecto_schema_module_to_changes_list_map, full_options)
+    |> run_tokens(ecto_schema_module_to_changes_list_map, full_options)
+    |> run_token_transfers(ecto_schema_module_to_changes_list_map, full_options)
   end
 
   defp run_addresses(multi, ecto_schema_module_to_changes_list_map, options)
@@ -367,6 +400,44 @@ defmodule Explorer.Chain.Import do
           insert_logs(
             logs_changes,
             timeout: options[:logs][:timeout] || @insert_logs_timeout,
+            timestamps: timestamps
+          )
+        end)
+
+      _ ->
+        multi
+    end
+  end
+
+  defp run_tokens(multi, ecto_schema_module_to_changes_list, options)
+       when is_map(ecto_schema_module_to_changes_list) and is_list(options) do
+    case ecto_schema_module_to_changes_list do
+      %{Token => tokens_changes} ->
+        timestamps = Keyword.fetch!(options, :timestamps)
+
+        Multi.run(multi, :tokens, fn _ ->
+          insert_tokens(
+            tokens_changes,
+            timeout: options[:tokens][:timeout] || @insert_tokens_timeout,
+            timestamps: timestamps
+          )
+        end)
+
+      _ ->
+        multi
+    end
+  end
+
+  defp run_token_transfers(multi, ecto_schema_module_to_changes_list, options)
+       when is_map(ecto_schema_module_to_changes_list) and is_list(options) do
+    case ecto_schema_module_to_changes_list do
+      %{TokenTransfer => token_transfers_changes} ->
+        timestamps = Keyword.fetch!(options, :timestamps)
+
+        Multi.run(multi, :token_transfers, fn _ ->
+          insert_token_transfers(
+            token_transfers_changes,
+            timeout: options[:token_transfers][:timeout] || @insert_token_transfers_timeout,
             timestamps: timestamps
           )
         end)
@@ -557,6 +628,52 @@ defmodule Explorer.Chain.Import do
         conflict_target: [:transaction_hash, :index],
         on_conflict: :replace_all,
         for: Log,
+        returning: true,
+        timeout: timeout,
+        timestamps: timestamps
+      )
+  end
+
+  @spec insert_tokens([map()], [timeout_option | timestamps_option]) ::
+  {:ok, [Token.t()]}
+  | {:error, [Changeset.t()]}
+  def insert_tokens(changes_list, named_arguments)
+      when is_list(changes_list) and is_list(named_arguments) do
+    timestamps = Keyword.fetch!(named_arguments, :timestamps)
+    timeout = Keyword.fetch!(named_arguments, :timeout)
+
+    # order so that row ShareLocks are grabbed in a consistent order
+    ordered_changes_list = Enum.sort_by(changes_list, & &1.contract_address_hash)
+
+    {:ok, _} =
+      insert_changes_list(
+        ordered_changes_list,
+        conflict_target: :contract_address_hash,
+        on_conflict: :nothing,
+        for: Token,
+        returning: true,
+        timeout: timeout,
+        timestamps: timestamps
+      )
+  end
+
+  @spec insert_token_transfers([map()], [timeout_option | timestamps_option]) ::
+          {:ok, [TokenTransfer.t()]}
+          | {:error, [Changeset.t()]}
+  def insert_token_transfers(changes_list, named_arguments)
+      when is_list(changes_list) and is_list(named_arguments) do
+    timestamps = Keyword.fetch!(named_arguments, :timestamps)
+    timeout = Keyword.fetch!(named_arguments, :timeout)
+
+    # order so that row ShareLocks are grabbed in a consistent order
+    ordered_changes_list = Enum.sort_by(changes_list, &{&1.transaction_hash, &1.log_index})
+
+    {:ok, _} =
+      insert_changes_list(
+        ordered_changes_list,
+        conflict_target: [:transaction_hash, :log_index],
+        on_conflict: :replace_all,
+        for: TokenTransfer,
         returning: true,
         timeout: timeout,
         timestamps: timestamps

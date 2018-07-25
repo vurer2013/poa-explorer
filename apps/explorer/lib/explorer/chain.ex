@@ -627,6 +627,16 @@ defmodule Explorer.Chain do
   end
 
   @doc """
+  Updates a `t:Token.t/0` with a map of values.
+  """
+  @spec update_token(Token.t(), map()) :: {:ok, Token.t()} | {:error, Changeset.t()}
+  def update_token(%Token{} = token, params) do
+    token
+    |> Token.changeset(params)
+    |> Repo.update()
+  end
+
+  @doc """
   The number of `t:Explorer.Chain.Address.t/0`.
 
       iex> insert_list(2, :address)
@@ -1709,5 +1719,41 @@ defmodule Explorer.Chain do
 
   defp supply_module do
     Application.get_env(:explorer, :supply, Explorer.Chain.Supply.ProofOfAuthority)
+  end
+
+  @doc """
+  Streams a lists token contract addresses that haven't been cataloged.
+  """
+  #@spec stream_uncataloged_token_contract_address_hashes :: [Hash.Address.t()]
+  def stream_uncataloged_token_contract_address_hashes(initial_acc, reducer) when is_function(reducer, 2) do
+    Repo.transaction(
+      fn ->
+        query =
+          from(
+            token in Token,
+            where: token.cataloged == false,
+            select: token.contract_address_hash
+          )
+
+        query
+        |> Repo.stream(timeout: :infinity)
+        |> Enum.reduce(initial_acc, reducer)
+      end,
+      timeout: :infinity
+    )
+  end
+
+  @doc """
+  Fetches a `t:Token.t/0` by an address hash.
+  """
+  @spec token_from_address_hash(Hash.Address.t()) :: {:ok, Token.t()} | {:error, :not_found}
+  def token_from_address_hash(%Hash{byte_count: unquote(Hash.Address.byte_count())} = hash) do
+    case Repo.get_by(Token, contract_address_hash: hash) do
+      nil ->
+        {:error, :not_found}
+
+      %Token{} = token ->
+        {:ok, token}
+    end
   end
 end

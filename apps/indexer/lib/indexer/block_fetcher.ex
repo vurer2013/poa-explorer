@@ -11,7 +11,16 @@ defmodule Indexer.BlockFetcher do
 
   alias EthereumJSONRPC
   alias Explorer.Chain
-  alias Indexer.{BalanceFetcher, AddressExtraction, BoundInterval, InternalTransactionFetcher, Sequence}
+
+  alias Indexer.{
+    AddressExtraction,
+    BalanceFetcher,
+    BoundInterval,
+    InternalTransactionFetcher,
+    Sequence,
+    TokenFetcher,
+    TokenTransfers
+  }
 
   # dialyzer thinks that Logger.debug functions always have no_local_return
   @dialyzer {:nowarn_function, import_range: 4}
@@ -328,7 +337,12 @@ defmodule Indexer.BlockFetcher do
   end
 
   defp async_import_remaining_block_data(results, named_arguments) when is_map(results) and is_list(named_arguments) do
-    %{transactions: transaction_hashes, addresses: address_hashes} = results
+    %{
+      transactions: transaction_hashes,
+      addresses: address_hashes,
+      tokens: tokens
+    } = results
+
     address_hash_to_block_number = Keyword.fetch!(named_arguments, :address_hash_to_fetched_balance_block_number)
 
     address_hashes
@@ -346,6 +360,10 @@ defmodule Indexer.BlockFetcher do
       %{block_number: block_number, hash: transaction_hash}
     end)
     |> InternalTransactionFetcher.async_fetch(10_000)
+
+    tokens
+    |> Enum.map(&(&1.contract_address_hash))
+    |> TokenFetcher.async_fetch()
   end
 
   defp realtime_task(%__MODULE__{json_rpc_named_arguments: json_rpc_named_arguments} = state) do
@@ -375,11 +393,13 @@ defmodule Indexer.BlockFetcher do
          {:receipts, {:ok, receipt_params}} <-
            {:receipts, fetch_transaction_receipts(state, transactions_without_receipts)},
          %{logs: logs, receipts: receipts} = receipt_params,
-         transactions_with_receipts = put_receipts(transactions_without_receipts, receipts) do
+         transactions_with_receipts = put_receipts(transactions_without_receipts, receipts),
+         %{token_transfers: token_transfers, tokens: tokens} = TokenTransfers.from_log_params(logs) do
       addresses =
         AddressExtraction.extract_addresses(%{
           blocks: blocks,
           logs: logs,
+          token_transfers: token_transfers,
           transactions: transactions_with_receipts
         })
 
@@ -391,6 +411,8 @@ defmodule Indexer.BlockFetcher do
         blocks: [params: blocks],
         logs: [params: logs],
         receipts: [params: receipts],
+        tokens: [on_conflict: :nothing, params: tokens],
+        token_transfers: [params: token_transfers],
         transactions: [on_conflict: :replace_all, params: transactions_with_receipts]
       )
     else
