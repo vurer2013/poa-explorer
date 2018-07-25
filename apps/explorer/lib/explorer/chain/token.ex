@@ -5,7 +5,8 @@ defmodule Explorer.Chain.Token do
 
   use Ecto.Schema
 
-  import Ecto.Changeset
+  import Ecto.{Changeset, Query}
+  alias Explorer.Repo
   alias Explorer.Chain.{Address, Hash, Token}
 
   @typedoc """
@@ -49,5 +50,14 @@ defmodule Explorer.Chain.Token do
     |> validate_required(~w(contract_address_hash))
     |> foreign_key_constraint(:contract_address)
     |> unique_constraint(:contract_address_hash)
+  end
+
+  @spec token_from_address(Hash.t()) :: Token.t()
+  def token_from_address(address_hash) do
+    from(
+      t in Token,
+      where: t.contract_address_hash == ^address_hash
+    )
+    |> Repo.one()
   end
 end

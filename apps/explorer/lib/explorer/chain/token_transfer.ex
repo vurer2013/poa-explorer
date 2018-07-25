@@ -24,9 +24,12 @@ defmodule Explorer.Chain.TokenTransfer do
 
   use Ecto.Schema
 
-  import Ecto.Changeset
+  import Ecto.{Changeset, Query}
 
-  alias Explorer.Chain.{Address, Hash, Transaction, TokenTransfer}
+  alias Explorer.Chain.{Address, Hash, Transaction, TokenTransfer, Token}
+  alias Explorer.{PagingOptions, Repo}
+
+  @default_paging_options %PagingOptions{page_size: 50}
 
   @typedoc """
   * `:amount` - The token transferred amount
@@ -94,4 +97,29 @@ defmodule Explorer.Chain.TokenTransfer do
   `first_topic` field.
   """
   def constant, do: @constant
+
+  @spec fetch_token_transfers(Hash.t(), PagingOptions.t()) :: []
+  def fetch_token_transfers(address_hash, paging_options \\ @default_paging_options) do
+    query =
+      from(
+        tt in TokenTransfer,
+        join: t in Token, on: t.contract_address_hash == tt.token_contract_address_hash,
+        where: tt.to_address_hash == ^address_hash or tt.from_address_hash == ^address_hash,
+        preload: [:transaction, :token]
+      )
+      |> page_token_transfer(paging_options)
+      |> limit(^paging_options.page_size)
+
+    Repo.all(query)
+  end
+
+  defp page_token_transfer(query, %PagingOptions{key: nil}), do: query
+
+  defp page_token_transfer(query, %PagingOptions{key: last_id}) do
+    where(
+      query,
+      [token_transfer],
+      token_transfer.id > ^last_id
+    )
+  end
 end
